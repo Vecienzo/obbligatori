@@ -1,342 +1,322 @@
-// --- Variabili Globali ---
+console.log("🚀 script.js (v1.4) caricato correttamente");
+
+// Stati globali
 let loadedDrugData = [];
-let currentlyDisplayedData = [];
-let currentSortColumn = null;
-let currentSortDirection = 'asc';
-let lastFilterType = 'all';
+const sortDirections = { nome:true,codice:true,disponibilita:true,posizione:true,scadenza:true };
 
-// --- Definizioni delle Funzioni ---
+// DOM refs
+const fileInput           = document.getElementById('csvFileInput');
+const statusMessage       = document.getElementById('statusMessage');
+const auditReminder       = document.getElementById('auditReminder');
+const startAuditButton    = document.getElementById('startAuditButton');
+const resetAuditButton    = document.getElementById('resetAuditButton');
+const auditHistorySection = document.getElementById('auditHistorySection');
+const auditHistoryList    = document.getElementById('auditHistoryList');
+const auditSnapshotView   = document.getElementById('auditSnapshotView');
+const snapshotDateSpan    = document.getElementById('snapshotDate');
+const snapshotTableBody   = document.getElementById('snapshotTableBody');
+const closeSnapshotButton = document.getElementById('closeSnapshotButton');
+const interactionArea     = document.getElementById('interactionArea');
+const searchInput         = document.getElementById('searchInput');
+const searchButton        = document.getElementById('searchButton');
+const showAllButton       = document.getElementById('showAllButton');
+const checkExpiryButton   = document.getElementById('checkExpiryButton');
+const checkStockButton    = document.getElementById('checkStockButton');
+const downloadCsvButton   = document.getElementById('downloadExcelButton');
+const printTableButton    = document.getElementById('printButton');
+const locationFilterSelect= document.getElementById('locationFilter');
+const resultsTableBody    = document.getElementById('resultsTableBody');
+const notFoundMessageArea = document.getElementById('notFoundMessageArea');
+const toast               = document.getElementById('toast');
 
-function handleFileSelect(event) {
-    const file = event.target.files[0];
-    // Otteniamo riferimenti DOM necessari per il reset
-    const statusMessage = document.getElementById('statusMessage');
-    const interactionArea = document.getElementById('interactionArea');
-    const notFoundMessageArea = document.getElementById('notFoundMessageArea');
-    const resultsTableBody = document.getElementById('resultsTableBody');
-    const fileInput = document.getElementById('csvFileInput');
-    const exportCsvButton = document.getElementById('exportCsvButton');
+// Event listeners
+window.addEventListener('load', () => {
+  checkAuditStatus();
+  populateAuditHistory();
+});
+fileInput.addEventListener('change', handleFileSelect);
+searchButton .addEventListener('click', searchDrug);
+showAllButton.addEventListener('click', displayAllDrugs);
+checkExpiryButton.addEventListener('click', checkExpiringDrugs);
+checkStockButton .addEventListener('click', checkZeroStock);
+downloadCsvButton.addEventListener('click', downloadAsExcel);
+printTableButton .addEventListener('click', printResults);
+startAuditButton.addEventListener('click', confirmAuditCheck);
+resetAuditButton.addEventListener('click', () => {
+  localStorage.removeItem('lastAuditCheck');
+  showToast('✅ Stato revisione resettato.');
+  checkAuditStatus();
+});
+searchInput   .addEventListener('keypress', e => { if(e.key==='Enter') searchDrug(); });
+closeSnapshotButton.addEventListener('click', ()=>auditSnapshotView.style.display='none');
 
-    // Reset stato interfaccia e dati
-    if (statusMessage) { statusMessage.textContent = 'Nessun file selezionato.'; statusMessage.className = ''; }
-    if (interactionArea) interactionArea.style.display = 'none';
-    if (notFoundMessageArea) notFoundMessageArea.style.display = 'none';
-    if (resultsTableBody) resultsTableBody.innerHTML = '';
-    loadedDrugData = []; currentlyDisplayedData = [];
-    clearLocationFilter(); // Chiama la funzione definita sotto
-    currentSortColumn = null; currentSortDirection = 'asc';
-    updateSortIndicators(); // Chiama la funzione definita sotto
-    if(exportCsvButton) exportCsvButton.style.display = 'none';
+// --- Revisione mensile e storico ---
+function checkAuditStatus(){
+  const last = localStorage.getItem('lastAuditCheck');
+  const now  = new Date();
+  const thisMonth = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+  auditReminder.style.display = (!last||!last.startsWith(thisMonth))?'flex':'none';
+}
 
-    if (!file) { return; } // Esce se non c'è file
+function confirmAuditCheck(){
+  const now = new Date();
+  const monthKey = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;
+  localStorage.setItem('lastAuditCheck', monthKey);
+  addAuditHistory(monthKey, loadedDrugData);
+  showToast('✔️ Revisione confermata.');
+  printAuditConfirmation(monthKey);
+  auditReminder.style.display = 'none';
+  populateAuditHistory();
+}
 
-    // Controllo tipo file
-    if (file.type && !file.type.match('text/csv') && !file.name.toLowerCase().endsWith('.csv') ) {
-         if (statusMessage) { statusMessage.textContent = 'Errore: Seleziona un file .csv!'; statusMessage.className = 'error'; }
-         if(fileInput) fileInput.value = ''; return;
-     }
+function printAuditConfirmation(monthKey){
+  const [year,month] = monthKey.split('-');
+  const formatted = `${month}/${year}`;
+  const w = window.open('','_blank','width=400,height=300');
+  w.document.write(`
+    <html><head><title>Conferma Revisione</title></head>
+    <body style="font-family:sans-serif;padding:20px;">
+      <h2>Revisione Giacenze</h2>
+      <p>Data conferma: <strong>${formatted}</strong></p>
+    </body></html>`);
+  w.document.close(); w.print(); w.close();
+}
 
-    if (statusMessage) { statusMessage.textContent = 'Caricamento file...'; statusMessage.className = ''; }
-    const reader = new FileReader();
+function loadAuditHistory(){
+  return JSON.parse(localStorage.getItem('auditHistory')||'[]');
+}
 
-    reader.onload = function(e) {
-        const csvContent = e.target.result;
-        try {
-            // Chiamata diretta a parseCSV
-            loadedDrugData = parseCSV(csvContent);
+function saveAuditHistory(hist){
+  localStorage.setItem('auditHistory', JSON.stringify(hist));
+}
 
-            // Controllo robusto: parseCSV ora DOVREBBE sempre tornare un array
-            if (Array.isArray(loadedDrugData)) {
-                 // Successo: aggiorna stato e interfaccia
-                 if (statusMessage) { statusMessage.textContent = `File "${file.name}" caricato (${loadedDrugData.length} righe).`; statusMessage.className = 'success'; }
-                 if (interactionArea) interactionArea.style.display = 'block'; // Mostra area interazione
-                 if (resultsTableBody) resultsTableBody.innerHTML = ''; // Pulisce tabella
-                 if (notFoundMessageArea) notFoundMessageArea.style.display = 'none'; // Nasconde area messaggi
-                 const searchInput = document.getElementById('searchInput'); if (searchInput) searchInput.value = '';
-                 currentSortColumn = null; currentSortDirection = 'asc'; // Resetta ordinamento
-                 updateSortIndicators(); // Aggiorna indicatori
-                 populateLocationFilter(loadedDrugData); // Popola filtro location
-            } else {
-                 // Questo non dovrebbe succedere se parseCSV è corretto
-                 throw new Error("parseCSV non ha restituito un array.");
-            }
+function addAuditHistory(monthKey, snapshot){
+  const hist=loadAuditHistory();
+  const idx=hist.findIndex(h=>h.monthKey===monthKey);
+  const entry={ monthKey, timestamp:new Date().toISOString(), data:JSON.parse(JSON.stringify(snapshot)) };
+  if(idx>=0) hist[idx]=entry;
+  else hist.push(entry);
+  saveAuditHistory(hist);
+}
 
-        } catch (error) { // Cattura errori da parseCSV o dal throw sopra
-             console.error("!!! Errore durante l'elaborazione del file:", error); // Log errore principale
-             if (statusMessage) { statusMessage.textContent = `Errore durante la lettura: ${error.message}`; statusMessage.className = 'error'; }
-             // Reset interfaccia e stato
-             if (interactionArea) interactionArea.style.display = 'none';
-             if (notFoundMessageArea) notFoundMessageArea.style.display = 'none';
-             loadedDrugData = []; currentlyDisplayedData = []; clearLocationFilter(); currentSortColumn = null; currentSortDirection = 'asc'; updateSortIndicators();
-             if (exportCsvButton) exportCsvButton.style.display = 'none';
-             if (fileInput) fileInput.value = '';
-        }
-    }; // Chiusura reader.onload
+function populateAuditHistory(){
+  const hist=loadAuditHistory();
+  auditHistoryList.innerHTML='';
+  if(!hist.length){ auditHistorySection.style.display='none'; return; }
+  auditHistorySection.style.display='block';
+  hist.forEach((h,i)=>{
+    const [y,m]=h.monthKey.split('-');
+    const li=document.createElement('li');
+    li.textContent=`Revisione ${m}/${y} (il ${new Date(h.timestamp).toLocaleString()})`;
+    const btn=document.createElement('button');
+    btn.textContent='Visualizza';
+    btn.className='viewSnapshotButton';
+    btn.addEventListener('click',()=>showAuditSnapshot(i));
+    li.appendChild(btn);
+    auditHistoryList.appendChild(li);
+  });
+}
 
-    reader.onerror = function(e) {
-         console.error("Errore FileReader:", e);
-         if (statusMessage) { statusMessage.textContent = 'Errore imprevisto durante la lettura del file.'; statusMessage.className = 'error'; }
-         if (interactionArea) interactionArea.style.display = 'none'; if (notFoundMessageArea) notFoundMessageArea.style.display = 'none';
-         loadedDrugData = []; currentlyDisplayedData = []; clearLocationFilter(); currentSortColumn = null; currentSortDirection = 'asc'; updateSortIndicators();
-         if (exportCsvButton) exportCsvButton.style.display = 'none'; if (fileInput) fileInput.value = '';
-     }; // Chiusura reader.onerror
-
-    // Legge il file (proviamo ancora con windows-1252, altrimenti cambiare in 'utf-8')
-    reader.readAsText(file, 'windows-1252');
-} // Chiusura handleFileSelect
-
-
-// Elabora il testo CSV --- MODIFICATO: Rimosso try/catch interno, garantisce return [] ---
-function parseCSV(csvText) {
-    const data = []; // Inizializza SEMPRE come array vuoto
-    if (!csvText) {
-        console.warn("[parseCSV] Input CSV vuoto o nullo.");
-        return data; // Restituisce array vuoto
-    }
-
-    const lines = csvText.split(/\r?\n/);
-    while (lines.length > 0 && lines[lines.length - 1].trim() === '') { lines.pop(); }
-
-    if (lines.length < 2) {
-        // Potremmo restituire [] o lanciare errore. Lanciamo errore.
-        throw new Error("Il file CSV non contiene almeno una riga di intestazione e una di dati.");
-    }
-
-    const headerLine = lines[0];
-    const headers = headerLine.split(';').map(h => h.trim().toLowerCase());
-
-    if (!headers || !Array.isArray(headers) || headers.length === 0 || headers.every(h => h === '')) {
-         throw new Error("Formato intestazione CSV non valido.");
-    }
-
-    const idx = { c: headers.indexOf("codice aic"), n: headers.indexOf("denominazione"), q: headers.indexOf("qta"), u: headers.indexOf("ubicazione"), s: headers.indexOf("scadenza") };
-    let missingColumns = [];
-    if (idx.c === -1) missingColumns.push('"codice aic"'); if (idx.n === -1) missingColumns.push('"denominazione"'); if (idx.q === -1) missingColumns.push('"qta"'); if (idx.u === -1) missingColumns.push('"ubicazione"'); if (idx.s === -1) missingColumns.push('"scadenza"');
-    if (missingColumns.length > 0) {
-        throw new Error(`Intestazioni CSV non trovate: ${missingColumns.join(', ')}.`);
-    }
-
-    for (let i = 1; i < lines.length; i++) {
-        try { // Try per singola riga per maggiore robustezza? Opzionale.
-            const line = lines[i];
-            if (line === undefined || line === null || line.trim() === '') continue;
-
-            const cols = line.split(';').map(col => col.trim());
-
-            const codice = cols[idx.c] || ''; const nome = cols[idx.n] || '';
-            const disponibilita = cols[idx.q] || ''; const posizione = cols[idx.u] || '';
-            const scadenzaRaw = cols[idx.s] || ''; let scadenzaFormatted = '';
-
-            if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(scadenzaRaw)) { const p=scadenzaRaw.split('/'); scadenzaFormatted = `${p[2]}-${p[1].padStart(2,'0')}-${p[0].padStart(2,'0')}`; }
-            else if (/^\d{4}-\d{2}-\d{2}$/.test(scadenzaRaw)) { scadenzaFormatted = scadenzaRaw; }
-            else { scadenzaFormatted = scadenzaRaw; }
-
-            data.push({ codice, nome, disponibilita, posizione, scadenza: scadenzaFormatted });
-        } catch (lineError) {
-            console.warn(`[parseCSV] Errore nell'elaborazione della riga ${i+1}: "${lines[i]}". Errore: ${lineError.message}. Riga saltata.`);
-            // Continua con la riga successiva invece di bloccare tutto
-            continue;
-        }
-    } // Chiusura for loop
-
-    return data; // Restituisce l'array (che è stato inizializzato come [])
-} // Chiusura parseCSV
-
-
-function populateLocationFilter(data) {
-     const locationFilterSelect = document.getElementById('locationFilter');
-     if (!locationFilterSelect) return;
-    while (locationFilterSelect.options.length > 1) { locationFilterSelect.remove(1); }
-    const locations = [...new Set(data.map(item => item.posizione).filter(pos => pos))]
-                      .sort((a, b) => a.localeCompare(b));
-    locations.forEach(loc => { const opt = document.createElement('option'); opt.value = loc; opt.textContent = loc; locationFilterSelect.appendChild(opt); });
-    locationFilterSelect.value = "";
-} // Chiusura populateLocationFilter
-
-function clearLocationFilter() {
-     const locationFilterSelect = document.getElementById('locationFilter');
-     if (!locationFilterSelect) return;
-     while (locationFilterSelect.options.length > 1) { locationFilterSelect.remove(1); }
-     locationFilterSelect.value = "";
-} // Chiusura clearLocationFilter
-
-function filterData() {
-     const searchInput = document.getElementById('searchInput');
-     const locationFilterSelect = document.getElementById('locationFilter');
-     if (!loadedDrugData || loadedDrugData.length === 0) return [];
-    const searchTerm = searchInput ? searchInput.value.trim().toLowerCase() : "";
-    const selectedLocation = locationFilterSelect ? locationFilterSelect.value : "";
-    let filtered = loadedDrugData;
-    if (selectedLocation) { filtered = filtered.filter(drug => drug.posizione === selectedLocation); }
-    if (searchTerm) { filtered = filtered.filter(drug => (drug.codice && String(drug.codice).toLowerCase() === searchTerm) || (drug.nome && drug.nome.toLowerCase().includes(searchTerm))); }
-    return filtered;
-} // Chiusura filterData
-
-function handleHeaderClick(event) {
-    const targetHeader = event.target.closest('th');
-    if (!targetHeader || !targetHeader.dataset.column) { return; }
-    const column = targetHeader.dataset.column;
-    if (currentSortColumn === column) { currentSortDirection = (currentSortDirection === 'asc') ? 'desc' : 'asc'; }
-    else { currentSortColumn = column; currentSortDirection = 'asc'; }
-    sortAndDisplayData();
-} // Chiusura handleHeaderClick
-
-function sortAndDisplayData() {
-    const resultsTableBody = document.getElementById('resultsTableBody');
-    if (!resultsTableBody) return;
-    if (!currentlyDisplayedData || currentlyDisplayedData.length === 0) { resultsTableBody.innerHTML = ''; return; }
-    sortData(currentlyDisplayedData, currentSortColumn, currentSortDirection);
-    updateSortIndicators();
-    displayResults(currentlyDisplayedData, "Nessun dato da visualizzare.", getCurrentHighlightOptions());
-} // Chiusura sortAndDisplayData
-
-function sortData(dataArray, column, direction) {
-    if (!column) return;
-    dataArray.sort((a, b) => {
-        let valA = a[column]; let valB = b[column]; let comparison = 0;
-        if (column === 'scadenza') { const dateA = parseDateForSort(valA); const dateB = parseDateForSort(valB); if (dateA === null && dateB === null) comparison = 0; else if (dateA === null) comparison = 1; else if (dateB === null) comparison = -1; else comparison = dateA - dateB; }
-        else if (column === 'disponibilita') { const numA = parseInt(valA, 10); const numB = parseInt(valB, 10); if (isNaN(numA) && isNaN(numB)) comparison = 0; else if (isNaN(numA)) comparison = 1; else if (isNaN(numB)) comparison = -1; else comparison = numA - numB; }
-        else { valA = String(valA || ''); valB = String(valB || ''); comparison = valA.localeCompare(valB, 'it', { sensitivity: 'base' }); }
-        return (direction === 'asc') ? comparison : (comparison * -1);
+function showAuditSnapshot(idx){
+  const h=loadAuditHistory()[idx];
+  const [y,m]=h.monthKey.split('-');
+  snapshotDateSpan.textContent=`${m}/${y}`;
+  snapshotTableBody.innerHTML='';
+  h.data.forEach(drug=>{
+    const tr=document.createElement('tr');
+    ['nome','codice','disponibilita','posizione','scadenza'].forEach(f=>{
+      const td=document.createElement('td');
+      td.textContent = f==='scadenza' 
+        ? (()=>{ const [yy,mm]=drug[f].split('-'); return `${mm}/${yy}`; })() 
+        : drug[f]||'';
+      tr.appendChild(td);
     });
-} // Chiusura sortData
+    snapshotTableBody.appendChild(tr);
+  });
+  auditSnapshotView.style.display='block';
+}
 
-function parseDateForSort(dateString) {
-    if (!dateString || !/^\d{4}-\d{2}-\d{2}$/.test(dateString)) return null;
-    try { const parts = dateString.split('-'); const dateObj = new Date(Date.UTC(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]))); if (isNaN(dateObj.getTime()) || dateObj.getUTCFullYear() != parts[0] || dateObj.getUTCMonth() + 1 != parts[1] || dateObj.getUTCDate() != parts[2]) return null; return dateObj.getTime(); }
-    catch (e) { return null; }
-} // Chiusura parseDateForSort
+// — Toast —
+function showToast(msg){
+  toast.textContent=msg;
+  toast.style.display='block';
+  toast.classList.remove('toast-message');
+  void toast.offsetWidth;
+  toast.classList.add('toast-message');
+  setTimeout(()=>toast.style.display='none',3000);
+}
 
-function updateSortIndicators() {
-     const tableHeader = document.querySelector('#resultsTable thead');
-     if (!tableHeader) return;
-    const headers = tableHeader.querySelectorAll('th[data-column]');
-    headers.forEach(th => { const column = th.dataset.column; th.classList.remove('sort-asc', 'sort-desc'); if (column === currentSortColumn) { th.classList.add(currentSortDirection === 'asc' ? 'sort-asc' : 'sort-desc'); } });
-} // Chiusura updateSortIndicators
+// — Caricamento e parsing CSV —
+function handleFileSelect(evt){
+  const file=evt.target.files[0];
+  statusMessage.textContent='';
+  interactionArea.style.display='none';
+  resultsTableBody.innerHTML='';
+  notFoundMessageArea.style.display='none';
+  clearLocationFilter();
+  loadedDrugData=[];
 
-function getCurrentHighlightOptions() { if (lastFilterType === 'expiry') return { highlight: 'expiry' }; if (lastFilterType === 'stock') return { highlight: 'stock' }; return {}; }
+  if(!file||(!file.type.match('text/csv')&& !file.name.toLowerCase().endsWith('.csv'))){
+    statusMessage.textContent='Errore: seleziona un file CSV valido.';
+    statusMessage.className='error';
+    return;
+  }
 
-function handleTableActions(event) {
-    const target = event.target; const row = target.closest('tr'); if (!row) return;
-    const expiryCell = row.querySelector('td:nth-child(5)'); if (!expiryCell) return;
-    const codice = row.dataset.codice; const exportCsvButton = document.getElementById('exportCsvButton');
-    if (target.classList.contains('edit-btn')) { const currentExpiry = expiryCell.dataset.originalValue || ''; expiryCell.innerHTML = `<input type="date" class="edit-input-date" value="${currentExpiry}"><button class="save-btn" data-codice="${codice}">Salva</button><button class="cancel-btn">Annulla</button>`; const actionCell = row.querySelector('td:last-child'); const editButton = actionCell.querySelector('.edit-btn'); if (editButton) editButton.style.display = 'none'; }
-    else if (target.classList.contains('save-btn')) { const inputDate = expiryCell.querySelector('.edit-input-date'); const newExpiry = inputDate.value; const dataIndex = loadedDrugData.findIndex(item => item.codice === codice); if (dataIndex !== -1 && newExpiry && /^\d{4}-\d{2}-\d{2}$/.test(newExpiry)) { loadedDrugData[dataIndex].scadenza = newExpiry; console.log(`Scadenza aggiornata per ${codice} a ${newExpiry}`); let refreshedData; if (lastFilterType === 'search') refreshedData = filterData(); else if (lastFilterType === 'all') refreshedData = filterData(); else if (lastFilterType === 'expiry') { const locFiltered = filterData(); const today=new Date();today.setUTCHours(0,0,0,0);const oneMonthLater=new Date(today);oneMonthLater.setUTCMonth(today.getUTCMonth()+1); refreshedData = locFiltered.filter(drug => { const expTs=parseDateForSort(drug.scadenza); return expTs !== null && expTs >= today.getTime() && expTs <= oneMonthLater.getTime(); }); } else if (lastFilterType === 'stock') { const locFiltered = filterData(); refreshedData = locFiltered.filter(drug => drug.disponibilita === "0"); } else { refreshedData = filterData(); } currentlyDisplayedData = refreshedData; sortAndDisplayData(); if (exportCsvButton) exportCsvButton.style.display = 'inline-block'; } else { console.error("Errore nel salvare: indice/formato data", {codice, dataIndex, newExpiry}); sortAndDisplayData(); } }
-    else if (target.classList.contains('cancel-btn')) { sortAndDisplayData(); }
-} // Chiusura handleTableActions
-
-function handleExportCSV() {
-    if (loadedDrugData.length === 0) { alert("Nessun dato da esportare."); return; }
-    const headers = ["codice aic", "denominazione", "qta", "ubicazione", "scadenza"]; let csvString = headers.join(';') + '\r\n';
-    loadedDrugData.forEach(item => { const scadenzaOutput = formatDate(item.scadenza); const codice = escapeCsvField(item.codice || ''); const nome = escapeCsvField(item.nome || ''); const disponibilita = escapeCsvField(item.disponibilita || ''); const posizione = escapeCsvField(item.posizione || ''); const scadenza = escapeCsvField(scadenzaOutput); csvString += `${codice};${nome};${disponibilita};${posizione};${scadenza}\r\n`; });
-    const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' }); const link = document.createElement("a");
-    if (link.download !== undefined) { const url = URL.createObjectURL(blob); link.setAttribute("href", url); link.setAttribute("download", "inventario_aggiornato.csv"); link.style.visibility = 'hidden'; document.body.appendChild(link); link.click(); document.body.removeChild(link); URL.revokeObjectURL(url); }
-    else { alert("Esportazione CSV non supportata."); }
-} // Chiusura handleExportCSV
-
-function escapeCsvField(field) { if (/[";\n\r]/.test(field)) { return '"' + field.replace(/"/g, '""') + '"'; } return field; }
-
-function displayResults(drugArray, notFoundMessage, options = {}) {
-     const resultsTableBody = document.getElementById('resultsTableBody'); if (!resultsTableBody) return; resultsTableBody.innerHTML = '';
-    if (drugArray && drugArray.length > 0) {
-        drugArray.forEach((drug, index) => { const tr = document.createElement('tr'); tr.dataset.codice = drug.codice || `generated_${index}`; const tdNome=document.createElement('td'); tdNome.textContent=drug.nome||'N/D'; tr.appendChild(tdNome); const tdCodice=document.createElement('td'); tdCodice.textContent=drug.codice||'N/D'; tr.appendChild(tdCodice); const tdDisp=document.createElement('td'); const stockValue=drug.disponibilita||'N/D'; if(options.highlight==='stock'&&stockValue==="0"){const span=document.createElement('span'); span.className='zero-stock'; span.textContent=stockValue; tdDisp.appendChild(span);} else{tdDisp.textContent=stockValue;} tr.appendChild(tdDisp); const tdPos=document.createElement('td'); tdPos.textContent=drug.posizione||'N/D'; tr.appendChild(tdPos); const tdScad=document.createElement('td'); const formattedDate=formatDate(drug.scadenza); tdScad.dataset.originalValue = drug.scadenza || ''; if(options.highlight==='expiry'){const span=document.createElement('span'); span.className='expired-date'; span.textContent=formattedDate; tdScad.appendChild(span);} else{tdScad.textContent=formattedDate;} tr.appendChild(tdScad); const tdAzioni = document.createElement('td'); tdAzioni.innerHTML = `<button class="edit-btn" data-codice="${drug.codice || ''}">Modifica</button>`; tr.appendChild(tdAzioni); resultsTableBody.appendChild(tr); });
+  const reader=new FileReader();
+  reader.onload=e=>{
+    try{
+      loadedDrugData=parseCSV(e.target.result);
+      statusMessage.textContent=`Caricati ${loadedDrugData.length} record dal file`;
+      statusMessage.className='success';
+      interactionArea.style.display='block';
+      populateLocationFilter(loadedDrugData);
+    }catch(err){
+      statusMessage.textContent=`Errore: ${err.message}`;
+      statusMessage.className='error';
     }
-} // Chiusura displayResults
-
-function formatDate(dateString) {
-    if (!dateString || dateString === '-' || !/^\d{4}-\d{2}-\d{2}$/.test(dateString)) { return dateString; }
-    try { const parts = dateString.split('-'); const year = parseInt(parts[0], 10); const month = parseInt(parts[1], 10); const day = parseInt(parts[2], 10); if (month < 1 || month > 12 || day < 1 || day > 31) { return dateString; } const dateObj = new Date(year, month - 1, day); if (isNaN(dateObj.getTime()) || dateObj.getFullYear() !== year || (dateObj.getMonth() + 1) !== month || dateObj.getDate() !== day) { return dateString; } const formattedDay = String(day).padStart(2, '0'); const formattedMonth = String(month).padStart(2, '0'); return `${formattedDay}/${formattedMonth}/${year}`;
-    } catch (e) { return dateString; }
-} // Chiusura formatDate
-
-// --- Funzioni Azioni Pulsanti (devono essere definite *prima* di DOMContentLoaded se non si usa const/let) ---
-// Siccome usiamo const/let per i riferimenti DOM dentro DOMContentLoaded,
-// le funzioni che li usano internamente DEVONO essere definite prima o passate come callback.
-// Qui sono definite prima, e ottengono i riferimenti DOM al loro interno o usano variabili globali.
-function searchDrug() {
-    const resultsTableBody = document.getElementById('resultsTableBody'); const notFoundMessageArea = document.getElementById('notFoundMessageArea'); const searchInput = document.getElementById('searchInput'); const locationFilterSelect = document.getElementById('locationFilter');
-    if (!resultsTableBody || !notFoundMessageArea) return;
-    resultsTableBody.innerHTML = ''; notFoundMessageArea.style.display = 'none';
-    if (loadedDrugData.length === 0) { notFoundMessageArea.textContent = 'Carica prima un file CSV.'; notFoundMessageArea.style.display = 'block'; return; }
-    const searchTerm = searchInput ? searchInput.value.trim() : ""; if (!searchTerm) { notFoundMessageArea.textContent = 'Inserisci un termine di ricerca.'; notFoundMessageArea.style.display = 'block'; return; }
-    currentlyDisplayedData = filterData(); lastFilterType = 'search';
-    sortAndDisplayData();
-    if (currentlyDisplayedData.length === 0) { const locationValue = locationFilterSelect ? locationFilterSelect.value : ""; const locationMsg = locationValue ? ` per "${locationValue}"` : ""; notFoundMessageArea.textContent = `Nessun farmaco trovato per "${searchTerm}"${locationMsg}.`; notFoundMessageArea.style.display = 'block'; }
+  };
+  reader.readAsText(file);
 }
 
-function displayAllDrugs() {
-    const resultsTableBody = document.getElementById('resultsTableBody'); const notFoundMessageArea = document.getElementById('notFoundMessageArea'); const searchInput = document.getElementById('searchInput'); const locationFilterSelect = document.getElementById('locationFilter');
-    if (!resultsTableBody || !notFoundMessageArea) return;
-    resultsTableBody.innerHTML = ''; notFoundMessageArea.style.display = 'none'; if(searchInput) searchInput.value = '';
-    if (loadedDrugData.length === 0) { notFoundMessageArea.textContent = 'Carica prima un file CSV.'; notFoundMessageArea.style.display = 'block'; return; }
-    currentlyDisplayedData = filterData(); lastFilterType = 'all';
-    sortAndDisplayData();
-    if (currentlyDisplayedData.length === 0) { const locationValue = locationFilterSelect ? locationFilterSelect.value : ""; const locationMsg = locationValue ? ` per "${locationValue}"` : ""; notFoundMessageArea.textContent = `Nessun dato caricato${locationMsg}.`; notFoundMessageArea.style.display = 'block'; }
+function parseCSV(text){
+  const lines=text.trim().split(/\r?\n/);
+  if(lines.length<2) throw new Error("CSV privo di dati.");
+  const hdr=lines[0].split(';').map(h=>h.trim().toLowerCase());
+  const idx={
+    codice:hdr.indexOf('codice aic'),
+    nome:hdr.indexOf('denominazione'),
+    disponibilita:hdr.indexOf('qta'),
+    posizione:hdr.indexOf('ubicazione'),
+    scadenza:hdr.indexOf('scadenza')
+  };
+  if(Object.values(idx).includes(-1)) throw new Error("Header CSV mancanti.");
+  return lines.slice(1).map(line=>{
+    const c=line.split(';').map(x=>x.trim());
+    return {
+      codice:c[idx.codice],
+      nome:c[idx.nome],
+      disponibilita:c[idx.disponibilita],
+      posizione:c[idx.posizione],
+      scadenza:c[idx.scadenza].split('/').reverse().join('-')
+    };
+  });
 }
 
-function checkExpiringDrugs() {
-    const resultsTableBody = document.getElementById('resultsTableBody'); const notFoundMessageArea = document.getElementById('notFoundMessageArea'); const searchInput = document.getElementById('searchInput'); const locationFilterSelect = document.getElementById('locationFilter');
-    if (!resultsTableBody || !notFoundMessageArea) return;
-    resultsTableBody.innerHTML = ''; notFoundMessageArea.style.display = 'none'; if(searchInput) searchInput.value = '';
-    if (loadedDrugData.length === 0) { notFoundMessageArea.textContent = 'Carica prima un file CSV.'; notFoundMessageArea.style.display = 'block'; return; }
-    const locationFilteredData = filterData(); const today = new Date(); today.setUTCHours(0, 0, 0, 0); const oneMonthLater = new Date(today); oneMonthLater.setUTCMonth(today.getUTCMonth() + 1);
-    currentlyDisplayedData = locationFilteredData.filter(drug => { const expTs = parseDateForSort(drug.scadenza); return expTs !== null && expTs >= today.getTime() && expTs <= oneMonthLater.getTime(); });
-    lastFilterType = 'expiry';
-    sortAndDisplayData();
-    if (currentlyDisplayedData.length === 0) { const locationValue = locationFilterSelect ? locationFilterSelect.value : ""; const locationMsg = locationValue ? ` per "${locationValue}"` : ""; notFoundMessageArea.textContent = `Nessun prodotto in scadenza entro un mese${locationMsg}.`; notFoundMessageArea.style.display = 'block'; }
+// — Filtri & Ubicazioni —
+function populateLocationFilter(data){
+  clearLocationFilter();
+  [...new Set(data.map(d=>d.posizione).filter(Boolean))].sort()
+    .forEach(loc=>locationFilterSelect.appendChild(new Option(loc,loc)));
+}
+function clearLocationFilter(){
+  locationFilterSelect.innerHTML='<option value="">Tutte</option>';
+}
+function filterData(){
+  const term=searchInput.value.trim().toLowerCase(), loc=locationFilterSelect.value;
+  return loadedDrugData.filter(drug=>
+    (!loc||drug.posizione===loc)&&
+    (!term||
+      drug.codice.toLowerCase().includes(term)||
+      drug.nome.toLowerCase().includes(term)
+    )
+  );
 }
 
-function checkZeroStock() {
-    const resultsTableBody = document.getElementById('resultsTableBody'); const notFoundMessageArea = document.getElementById('notFoundMessageArea'); const searchInput = document.getElementById('searchInput'); const locationFilterSelect = document.getElementById('locationFilter');
-    if (!resultsTableBody || !notFoundMessageArea) return;
-    resultsTableBody.innerHTML = ''; notFoundMessageArea.style.display = 'none'; if(searchInput) searchInput.value = '';
-    if (loadedDrugData.length === 0) { notFoundMessageArea.textContent = 'Carica prima un file CSV.'; notFoundMessageArea.style.display = 'block'; return; }
-    const locationFilteredData = filterData();
-    currentlyDisplayedData = locationFilteredData.filter(drug => drug.disponibilita === "0");
-    lastFilterType = 'stock';
-    sortAndDisplayData();
-    if (currentlyDisplayedData.length === 0) { const locationValue = locationFilterSelect ? locationFilterSelect.value : ""; const locationMsg = locationValue ? ` per "${locationValue}"` : ""; notFoundMessageArea.textContent = `Nessun prodotto con giacenza zero trovato${locationMsg}.`; notFoundMessageArea.style.display = 'block'; }
+// — Azioni principali —
+function searchDrug(){ displayResults(filterData(),'Nessun risultato.'); }
+function displayAllDrugs(){ searchInput.value=''; displayResults(filterData(),'Nessun dato.'); }
+function checkExpiringDrugs(){
+  const oggi=new Date(), prox=new Date(oggi.getFullYear(),oggi.getMonth()+1,oggi.getDate());
+  displayResults(
+    filterData().filter(d=>{const s=new Date(d.scadenza);return s>=oggi&&s<=prox;}),
+    'Nessuna scadenza entro 30 gg.',{highlight:'expiry'}
+  );
+}
+function checkZeroStock(){
+  displayResults(
+    filterData().filter(d=>d.disponibilita==='0'),
+    'Nessuna giacenza zero.',{highlight:'stock'}
+  );
 }
 
+// — Rendering tabella —
+function displayResults(data,emptyMsg,opts={}){
+  resultsTableBody.innerHTML='';
+  notFoundMessageArea.style.display=data.length?'none':'block';
+  notFoundMessageArea.textContent=emptyMsg;
 
-// --- Esecuzione Codice e Assegnazione Event Listeners ---
-document.addEventListener('DOMContentLoaded', () => {
-    console.log("DOMContentLoaded: Evento scattato."); // Log inizio DOMContentLoaded
+  data.forEach((drug,i)=>{
+    const row=resultsTableBody.insertRow();
+    ['nome','codice','disponibilita','posizione','scadenza'].forEach(field=>{
+      const cell=row.insertCell();
+      if(field==='scadenza'){
+        const raw=drug[field],[y,m]=raw.split('-');
+        const inp=document.createElement('input');inp.type='month';inp.value=`${y}-${m}`;inp.classList.add('date-input');
+        const wrap=document.createElement('div');wrap.className='tooltip-wrapper';wrap.appendChild(inp);
+        const tip=document.createElement('span');tip.className='tooltip-text';tip.textContent=`Scadenza completa: ${raw}`;wrap.appendChild(tip);
+        cell.appendChild(wrap);
+        inp.addEventListener('change',()=>{
+          const [yy,mm]=inp.value.split('-');
+          const sel=new Date(parseInt(yy),parseInt(mm),0);
+          const now=new Date(),minD=new Date(now.getFullYear(),now.getMonth()+2,now.getDate());
+          if(sel<minD){
+            showToast('⚠️ Scadenza almeno 2 mesi nel futuro.');
+            inp.value=`${y}-${m}`;
+          }else updateDrugData(i,field,`${yy}-${mm}-01`);
+        });
+      }else if(field==='posizione'){
+        cell.contentEditable=true;cell.classList.add('editable');cell.textContent=drug[field];
+        cell.addEventListener('blur',()=>updateDrugData(i,field,cell.textContent.trim()));
+      }else{
+        if(field==='scadenza'){
+          const raw=drug[field],[yy,mm]=raw.split('-');
+          const short=`${mm}/${yy}`;
+          const wrap=document.createElement('div');wrap.className='tooltip-wrapper';wrap.textContent=short;
+          const tip=document.createElement('span');tip.className='tooltip-text';tip.textContent=`Scadenza completa: ${raw}`;wrap.appendChild(tip);
+          cell.appendChild(wrap);
+        }else cell.textContent=drug[field]||'';
+      }
+      if(field==='disponibilita'&&drug[field]==='0')cell.classList.add('zero-stock');
+      if(field==='scadenza'&&opts.highlight==='expiry')cell.classList.add('expired-date');
+    });
+  });
+  enableColumnSorting();
+}
 
-    // Otteniamo i riferimenti agli elementi DOM
-    const fileInputElem = document.getElementById('csvFileInput');
-    const searchButtonElem = document.getElementById('searchButton');
-    const showAllButtonElem = document.getElementById('showAllButton');
-    const checkExpiryButtonElem = document.getElementById('checkExpiryButton'); // Definizione
-    const checkStockButtonElem = document.getElementById('checkStockButton');
-    const tableHeaderElem = document.querySelector('#resultsTable thead');
-    const searchInputElem = document.getElementById('searchInput');
-    const resultsTableBodyElem = document.getElementById('resultsTableBody');
-    const exportCsvButtonElem = document.getElementById('exportCsvButton');
+// — Aggiorna dato —
+function updateDrugData(idx,field,val){loadedDrugData[idx][field]=val;}
 
-    // Verifica elementi e log se non trovati
-    if (!fileInputElem) console.warn("Elemento #csvFileInput NON trovato!");
-    if (!searchButtonElem) console.warn("Elemento #searchButton NON trovato!");
-    if (!showAllButtonElem) console.warn("Elemento #showAllButton NON trovato!");
-    if (!checkExpiryButtonElem) console.warn("Elemento #checkExpiryButton NON trovato!"); // Aggiunto Warning
-    if (!checkStockButtonElem) console.warn("Elemento #checkStockButton NON trovato!");
-    if (!tableHeaderElem) console.warn("Elemento thead NON trovato!");
-    if (!searchInputElem) console.warn("Elemento #searchInput NON trovato!");
-    if (!resultsTableBodyElem) console.warn("Elemento #resultsTableBody NON trovato!");
-    if (!exportCsvButtonElem) console.warn("Elemento #exportCsvButton NON trovato!");
+// — Export CSV —
+function downloadAsExcel(){
+  const data=filterData();
+  if(!data.length){showToast('⚠️ Nessun dato da esportare.');return;}
+  const lines=['Codice AIC;Denominazione;Qta;Ubicazione;Scadenza'];
+  data.forEach(d=>lines.push(`${d.codice};${d.nome};${d.disponibilita};${d.posizione};${d.scadenza}`));
+  const blob=new Blob([lines.join('\n')],{type:'text/csv;charset=utf-8;'});
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='risultati_farmaci.csv';a.click();
+}
 
+// — Stampa tabella —
+function printResults(){
+  const html=document.querySelector('.table-container').innerHTML;
+  const w=window.open('','_blank','width=900,height=650');
+  w.document.write(`<html><head><title>Stampa Farmaci</title></head><body>${html}</body></html>`);
+  w.document.close();w.focus();w.print();w.close();
+}
 
-    // Aggiungiamo i listener solo se gli elementi esistono
-    if (fileInputElem) { fileInputElem.addEventListener('change', handleFileSelect, false); }
-    if (searchButtonElem) { searchButtonElem.addEventListener('click', searchDrug); }
-    if (showAllButtonElem) { showAllButtonElem.addEventListener('click', displayAllDrugs); }
-    if (checkExpiryButtonElem) { checkExpiryButtonElem.addEventListener('click', checkExpiringDrugs); } // Uso corretto
-    if (checkStockButtonElem) { checkStockButtonElem.addEventListener('click', checkZeroStock); }
-    if (tableHeaderElem) { tableHeaderElem.addEventListener('click', handleHeaderClick); }
-    if (searchInputElem) { searchInputElem.addEventListener('keypress', function(event) { if (event.key === 'Enter') { event.preventDefault(); searchDrug(); } }); }
-    if (resultsTableBodyElem) { resultsTableBodyElem.addEventListener('click', handleTableActions); }
-    if (exportCsvButtonElem) { exportCsvButtonElem.addEventListener('click', handleExportCSV); }
-
-    console.log("App inizializzata e listener aggiunti (o tentato di aggiungere).");
-
-}); // Fine DOMContentLoaded listener
+// — Ordinamento colonne —
+function enableColumnSorting(){
+  const headers=document.querySelectorAll('#resultsTable th'),
+        map=['nome','codice','disponibilita','posizione','scadenza'];
+  headers.forEach((th,i)=>th.onclick=()=>{
+    const col=map[i],dir=sortDirections[col]?1:-1;
+    const sorted=filterData().slice().sort((a,b)=>{
+      const A=a[col]||'',B=b[col]||'';
+      if(col==='disponibilita') return dir*(parseInt(A)-parseInt(B));
+      if(col==='scadenza')      return dir*(new Date(A)-new Date(B));
+      return dir*A.localeCompare(B);
+    });
+    sortDirections[col]=!sortDirections[col];
+    displayResults(sorted,'Nessun risultato.');
+  });
+}
