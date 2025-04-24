@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ricerca Farmaci Magazzino</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <div class="container">
+
+        <div class="logo-container">
+            <img src="Logo-FBM_2023.png" alt="Logo FBM" id="appLogo">
+        </div>
+
+        <div class="app-header">
+            <h1>Ricerca Farmaci</h1>
+        </div>
+
+
+        <div class="file-loader">
+            <label for="csvFileInput">Seleziona il file CSV dei farmaci:</label>
+            <input type="file" id="csvFileInput" accept=".csv">
+            <div id="statusMessage">Nessun file caricato.</div>
+        </div>
+
+        <hr>
+
+        <div class="search-area" id="interactionArea" style="display: none;">
+            <h2>Cerca o visualizza i dati caricati:</h2>
+            <div class="filters-box">
+                 <div class="search-box">
+                    <input type="text" id="searchInput" placeholder="Inserisci nome o codice farmaco...">
+                    <button id="searchButton">Cerca</button>
+                    <button id="showAllButton">Mostra Tutti</button>
+                    <button id="checkExpiryButton">Verifica Scadenze</button>
+                    <button id="checkStockButton">Giacenza Zero</button>
+                 </div>
+                 <div class="controls-box"> 
+                    <div class="location-filter-box">
+                        <label for="locationFilter">Filtra per Ubicazione:</label>
+                        <select id="locationFilter">
+                            <option value="">Tutte le Ubicazioni</option>
+                            </select>
+                    </div>
+                     
+                     <button id="exportCsvButton" style="display: none;">Esporta CSV Aggiornato</button>
+                     
+                 </div>
+            </div>
+
+            <div class="table-container">
+                <table id="resultsTable">
+                    <thead>
+                        <tr>
+                            <th>Nome</th>
+                            <th>Codice AIC</th>
+                            <th>Giacenza</th>
+                            <th>Ubicazione</th>
+                            <th>Scadenza</th>
+                            
+                            <th>Azioni</th>
+                             
+                        </tr>
+                    </thead>
+                    <tbody id="resultsTableBody">
+                        
+                    </tbody>
+                </table>
+            </div>
+
+            <div id="notFoundMessageArea" class="not-found" style="padding: 15px; display: none;">
+                </div>
+
+        </div>
+
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
