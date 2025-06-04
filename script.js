@@ -35,19 +35,19 @@ window.addEventListener('load', () => {
   populateAuditHistory();
 });
 fileInput.addEventListener('change', handleFileSelect);
-searchButton .addEventListener('click', searchDrug);
+searchButton.addEventListener('click', searchDrug);
 showAllButton.addEventListener('click', displayAllDrugs);
 checkExpiryButton.addEventListener('click', checkExpiringDrugs);
-checkStockButton .addEventListener('click', checkZeroStock);
+checkStockButton.addEventListener('click', checkZeroStock);
 downloadCsvButton.addEventListener('click', downloadAsExcel);
-printTableButton .addEventListener('click', printResults);
+printTableButton.addEventListener('click', printResults);
 startAuditButton.addEventListener('click', confirmAuditCheck);
 resetAuditButton.addEventListener('click', () => {
   localStorage.removeItem('lastAuditCheck');
   showToast('✅ Stato revisione resettato.');
   checkAuditStatus();
 });
-searchInput   .addEventListener('keypress', e => { if(e.key==='Enter') searchDrug(); });
+searchInput.addEventListener('keypress', e => { if(e.key==='Enter') searchDrug(); });
 closeSnapshotButton.addEventListener('click', ()=>auditSnapshotView.style.display='none');
 
 // --- Revisione mensile e storico ---
